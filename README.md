@@ -6,3 +6,8 @@ Group:
 David Vong
 Tyler
 Seth
+
+
+# How to install
+ 1. After cloining the repo in your local environment, run the following code
+`pip install -r requirements.txt`
