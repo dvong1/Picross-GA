@@ -1,0 +1,32 @@
+catalogue "gnonograms spade.gno"
+title "letterP"
+by "David Vong <dpvong01@louisville.cedu>"
+copyright "© 2010 Frederico Vera <dktcoding@gmail.com>"
+license CC-BY-SA-4.0
+height 11
+width 8
+
+rows
+0
+4
+6
+2,2
+2,2
+6
+4
+2
+2
+2
+0
+
+columns
+0
+9
+9
+2,2
+2,2
+4
+4
+0
+
+goal "0000000001111000011111100110011001100110011111100111100001100000011000000110000000000000"
