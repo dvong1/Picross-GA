@@ -6,7 +6,7 @@ filepath = "nons/letterP.non"
 columns = ["generation", "best_fitness", "avg_fitness", "std_fitness", "worst_fitness"]
 gaHistory = pd.DataFrame(columns=columns)
 
-fitnessDict = {} # Dictionary that will save current fitness of chromosomes in 
+
 
 # Import non files
 def importnon(path):

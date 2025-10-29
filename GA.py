@@ -1,5 +1,22 @@
 import random
 from data import importnon, filepath
+import numpy.random as npr
+
+class Chromosome:
+    def __init__(self, height, width, clues, data=None):
+        self.height = height
+        self.width = width
+        self.clues = clues
+
+        # Reapply new chromosome data from genetic operators
+        if data is not None:
+            self.chromosome = data
+        else:
+        # Create random row for each column index for initial population
+            self.chromosome = [random.choices([0, 1], k=width) for _ in range(height)]
+
+        self.fitness = evaluate(chromosome=self.chromosome, height=self.height, width=self.width, clues=clues)
+
 
 # Genetic Algorithm {
 #   initialize population;
@@ -17,30 +34,13 @@ maxGenerations = 5000 # Termination Criteria
 
 ##### INITIALIZATION #############
 
-# Initialize fitness dict to keep track of fitness of each population sample
-def setFitnessDict(fitnessDict, population, height, width, clues):
-    for i, chromosome in enumerate(population):
-        fitnessDict[i] = evaluate(chromosome=chromosome, height=height, width=width, clues=clues)
-
-    return fitnessDict
-
-# Update fitness dict when genetic operator occurs
-def updateFitnessDict(fitnessDict, population, replacement, height, width, clues):
-    fitnessDict[replacement] = evaluate(chromosome=population[replacement], height=height, width=width, clues=clues)
-
-    return fitnessDict
 
 # Create a randomized population of size N
-def generatePopulation(height, width):
+def generatePopulation(height, width, clues):
     population = []
 
     while(len(population)) < populationSize:
-        chromosome = [] 
-
-        for row in range(0, height):
-            randomRow = random.choices(range(0, 2), k=width)
-            chromosome.append(randomRow)
-
+        chromosome = Chromosome(height=height, width=width, clues=clues)
         population.append(chromosome)
 
     return population
@@ -147,6 +147,18 @@ def evaluate(chromosome, height, width, clues):
 
     return fitness
 
+#### GENETIC RECOMBINATION ####
+def selectParents(population):
+    # Create probability distribution based on fitness. Higher fitness = Higher % to be selected
+    max = sum([c.fitness for c in population])
+    selection_probs = [c.fitness/max for c in population]
+
+    # Randomly choose parents from probability distribution
+    parent1 = population[npr.choice(len(population), p=selection_probs)]
+    parent2 = population[npr.choice(len(population), p=selection_probs)]
+    return parent1, parent2
+
+
 #### GENETIC CROSSOVERS #####
 
 # Swap rows? - mutation
@@ -154,12 +166,9 @@ def evaluate(chromosome, height, width, clues):
 # Are there constraint aware operators?
 
 
-def crossover1(chromosome):
+def crossover1(parent1, parent2):
     return 0
 
-
-
-#### GENETIC RECOMBINATION ####
 
 def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.2):
     """
@@ -167,7 +176,7 @@ def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.
     clues: list of row or column clues
     mutation_rate: probability to mutate a row/column
     """
-    new_chromosome = [row[:] for row in chromosome]  # deep copy
+    new_chromosome = [row[:] for row in chromosome.chromosome]  # deep copy
 
     # Mutate rows
     for i in range(height):
@@ -202,7 +211,8 @@ def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.
             # Optional: randomly shift blocks to better match contiguous groups
             # (more advanced, can be implemented later)
 
-    return new_chromosome
+    mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
+    return mutation
 
 def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.5):
     """
@@ -218,7 +228,7 @@ def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_
     col_clues = clues[height:]  # columns are after the row clues
 
     # Deep copy of chromosome
-    new_chromosome = [row[:] for row in chromosome]
+    new_chromosome = [row[:] for row in chromosome.chromosome]
 
     # Iterate over each column
     for j in range(width):
@@ -248,11 +258,24 @@ def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_
             # Write back the mutated column
             for i in range(height):
                 new_chromosome[i][j] = col[i]
-
-    return new_chromosome
+    
+    mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
+    return mutation
 
 if __name__ == '__main__':
     height, width, clues, goal = importnon(filepath) # Retrieve info from .non file
+
+
     
-    population = generatePopulation(width=width, height=height)
+    p = generatePopulation(width=width, height=height, clues=clues)
+
+    # for i, chromosome in enumerate(p):
+    #     print(f"Chromsome {i} has fitness {chromosome.fitness}")
+
+    p1, p2 = selectParents(population=p)
+
+    print(f"1st sample fitness before mutation: {p[0].fitness}")
+    p[0] = constraint_aware_mutation(p[0], clues=clues, height=height, width=width, mutation_rate=0.9)
+    print(f"1st sample fitness after mutation: {p[0].fitness}")
+    print(f"Fitness of p1 and p2 are {p1.fitness, p2.fitness}")
 
