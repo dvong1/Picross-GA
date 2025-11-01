@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 filepath = "nons/letterP.non"
 
@@ -32,3 +33,23 @@ def importnon(path):
     clues = [[int(n) for n in clue[0].split(',')] for clue in clues]
 
     return height, width, clues, goal
+
+def updateHistory(df, generation, population):
+    fitness_values = fitness_values = [c.fitness for c in population]
+    
+    best_fitness = max(fitness_values)
+    worst_fitness = min(fitness_values)
+    avg_fitness = np.mean(fitness_values)
+    std_fitness = np.std(fitness_values)
+    
+    new_row = {
+        "generation": generation,
+        "best_fitness": best_fitness,
+        "avg_fitness": avg_fitness,
+        "std_fitness": std_fitness,
+        "worst_fitness": worst_fitness,
+    }
+    
+    new_df = pd.DataFrame([new_row])
+    new_df = new_df[df.columns]
+    return pd.concat([df, new_df], ignore_index=True)
