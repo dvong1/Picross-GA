@@ -34,7 +34,6 @@ maxGenerations = 5000 # Termination Criteria
 
 ##### INITIALIZATION #############
 
-
 # Create a randomized population of size N
 def generatePopulation(height, width, clues):
     population = []
@@ -45,7 +44,10 @@ def generatePopulation(height, width, clues):
 
     return population
     
+
+
 ###### EVALUATION #######
+
 def evaluate(chromosome, height, width, clues):
     # Use constraint satisfaction as evaluation function
     # To do this, we have must make 2 comparisons, does the row's sequence satisfy the constraints from the clues?
@@ -161,16 +163,45 @@ def selectParents(population):
 
 #### GENETIC CROSSOVERS #####
 
-# Swap rows? - mutation
-# Take a few rows from parent1 and a few rows from paretn2 - crossover
-# Are there constraint aware operators?
-
-
 def crossover1(parent1, parent2):
-    return 0
+    """Uniform Crossover, for each cell in child, randomly select corresponding cell value from parent 1 or 2"""
+    """Create an empty puzzle [each cell is 0], and iterate through all cells, each cell has 50% to get its value from parent1 and 50% from parent2"""
+    data = [[0]*parent1.width for row in parent1.chromosome]
+    for i in range(0, parent1.height):
+        for j in range(0, parent2.width):
+            if random.random() < 0.5: # 50% chance for cell to be inherited from parent 1 or 2
+                data[i][j] = parent1.chromosome[i][j]
+            else:
+                data[i][j] = parent2.chromosome[i][j]
+    child = Chromosome(height=parent1.height, width=parent1.width, clues=parent1.clues, data=data)
+    return child
+
+def row_based_crossover(parent1, parent2):
+    """
+    Row-based crossover for Nonogram GAs.
+    Each row in the child is inherited entirely from either parent1 or parent2.
+    """
+    height = parent1.height
+    width = parent1.width
+
+    new_data = []
+    for i in range(height):
+        if random.random() < 0.5:
+            new_data.append(parent1.chromosome[i][:])
+        else:
+            new_data.append(parent2.chromosome[i][:])
+
+    child = Chromosome(
+        height=height,
+        width=width,
+        clues=parent1.clues,
+        data=new_data
+    )
+    return child
 
 
-def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.2):
+
+def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.4):
     """
     chromosome: 2D list (height x width)
     clues: list of row or column clues
@@ -208,13 +239,10 @@ def constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.
                         row[idx] = 0
                         ones.remove(idx)
 
-            # Optional: randomly shift blocks to better match contiguous groups
-            # (more advanced, can be implemented later)
-
     mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
     return mutation
 
-def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.5):
+def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_rate=0.2):
     """
     Mutates a chromosome with respect to column constraints.
     
@@ -262,6 +290,51 @@ def column_constraint_aware_mutation(chromosome, clues, height, width, mutation_
     mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
     return mutation
 
+def random_mutation(chromosome, clues, mutation_rate=0.20):
+    """
+    Random mutation: Flip random cells with a given probability.
+    Does not consider nonogram constraints.
+    """
+    height = chromosome.height
+    width = chromosome.width
+    
+    # Deep copy to avoid modifying the original
+    new_chromosome = [row[:] for row in chromosome.chromosome]
+    
+    for i in range(height):
+        for j in range(width):
+            if random.random() < mutation_rate:
+                # Flip the bit (0 -> 1, 1 -> 0)
+                new_chromosome[i][j] = 1 - new_chromosome[i][j]
+
+    mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
+    
+    return mutation
+
+def guided_mutation(chromosome, goal_state, clues, mutation_rate=0.05):
+    """
+    Guided mutation that comapres goal state to current sample.
+    """
+    height = chromosome.height
+    width = chromosome.width
+
+    # Convert flattened goal into 2D grid
+    goal_grid = [goal_state[i * width:(i + 1) * width] for i in range(height)]
+
+    # Deep copy to avoid mutating the original
+    new_chromosome = [row[:] for row in chromosome.chromosome]
+
+    for i in range(height):
+        for j in range(width):
+            if new_chromosome[i][j] != goal_grid[i][j]:
+                if random.random() < mutation_rate:
+                    new_chromosome[i][j] = goal_grid[i][j]
+
+    # Return a new Chromosome object
+    mutation = Chromosome(height=height, width=width, clues=clues, data=new_chromosome)
+    return mutation
+
+
 if __name__ == '__main__':
     height, width, clues, goal = importnon(filepath) # Retrieve info from .non file
 
@@ -274,8 +347,14 @@ if __name__ == '__main__':
 
     p1, p2 = selectParents(population=p)
 
-    print(f"1st sample fitness before mutation: {p[0].fitness}")
-    p[0] = constraint_aware_mutation(p[0], clues=clues, height=height, width=width, mutation_rate=0.9)
-    print(f"1st sample fitness after mutation: {p[0].fitness}")
-    print(f"Fitness of p1 and p2 are {p1.fitness, p2.fitness}")
+    # print(f"1st sample fitness before mutation: {p[0].fitness}")
+    # p[0] = constraint_aware_mutation(p[0], clues=clues, height=height, width=width, mutation_rate=0.9)
+    # print(f"1st sample fitness after mutation: {p[0].fitness}")
+    # print(f"Fitness of p1 and p2 are {p1.fitness, p2.fitness}")
+
+    child = crossover1(parent1=p1, parent2=p2)
+    print(f"Fitness of p1: {p1.fitness}")
+    print(f"Fitness of p2: {p2.fitness}")
+    print(f"Fitness of child: {child.fitness}")
+    print(width, height, len(goal))
 

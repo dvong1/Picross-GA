@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-filepath = "nons/letterP.non"
+filepath = "nons/rhino.non"
 
 # Pandas dataframe for data collection
 columns = ["generation", "best_fitness", "avg_fitness", "std_fitness", "worst_fitness"]
@@ -49,7 +49,6 @@ def updateHistory(df, generation, population):
         "std_fitness": std_fitness,
         "worst_fitness": worst_fitness,
     }
-    
-    new_df = pd.DataFrame([new_row])
-    new_df = new_df[df.columns]
-    return pd.concat([df, new_df], ignore_index=True)
+
+    df.loc[len(df)] = new_row
+    return df
