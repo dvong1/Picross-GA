@@ -13,9 +13,12 @@ This Final Project for CSE 545 Fall 2025 aims to utilize a genetic algorithm to 
 
 
 Group:
-David Vong
-Tyler
-Seth
+David Vong 
+Tyler 
+Seth 
+Hieu  
+Spencer 
+Robert 
 
 # Project Architecture
 * /non is a dataset sub-directory that contains .non files which include clues, goal state, height and width of that puzzle
