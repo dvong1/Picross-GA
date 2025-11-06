@@ -2,18 +2,65 @@
 import argparse
 import os
 import random
-import time
 from datetime import datetime
 from typing import List, Tuple
-
+import json
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt, animation
 
 
 # =========================
-# Problem I/O
+# Problem I/O  -   Now with .json handling (wow (oh my gosh) (spencer have my babies you're so good got me FINNA COMPILE)))
 # =========================
+def _runs_of_ones(arr1d: np.ndarray) -> List[int]:
+    """
+    Return lengths of consecutive 1-runs in a 1D binary array.
+    Robust to dtype (avoids uint8 wraparound).
+    """
+    a = np.asarray(arr1d, dtype=np.uint8)
+    m = (a == 1)  # boolean mask
+    # Pad as int8 so diffs are signed
+    edges = np.diff(np.pad(m.astype(np.int8), (1, 1), mode="constant", constant_values=0))
+    starts = np.where(edges == 1)[0]
+    ends   = np.where(edges == -1)[0]
+    lengths = (ends - starts).tolist()
+    return lengths if lengths else [0]
+
+def json_converter(path: str) -> Tuple[int, int, List[List[int]], List[List[int]], np.ndarray]:
+    """
+    Load a goal grid from a JSON file containing a 2D list of 0/1 ints.
+    Returns:
+        height (int)
+        width  (int)
+        row_clues (List[List[int]])  # runs of 1s per row; [0] if no 1s
+        col_clues (List[List[int]])  # runs of 1s per column; [0] if no 1s
+        goal (np.ndarray)            # flat uint8 array of length h*w, row-major
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Validate rectangularity and values
+    if not isinstance(data, list) or not data or not isinstance(data[0], list):
+        raise ValueError("JSON must be a 2D list of 0/1 integers.")
+    width = len(data[0])
+    for r, row in enumerate(data):
+        if len(row) != width:
+            raise ValueError(f"Row {r} has length {len(row)} != {width}.")
+        if any((v not in (0, 1)) for v in row):
+            raise ValueError(f"Row {r} contains non-binary values.")
+    grid = np.array(data, dtype=np.uint8)
+    height, width = grid.shape
+
+    # Compute clues
+    row_clues = [_runs_of_ones(grid[r, :]) for r in range(height)]
+    col_clues = [_runs_of_ones(grid[:, c]) for c in range(width)]
+
+
+    goal = grid.reshape(-1).astype(np.uint8)
+
+    return height, width, row_clues, col_clues, goal
+
 
 def import_non(path: str) -> Tuple[int, int, List[List[int]], List[List[int]], np.ndarray]:
     """
@@ -98,8 +145,14 @@ def fitness_grid(grid: np.ndarray, row_clues, col_clues) -> float:
     return (1.0 / (1 + total)) * (h * w)
 
 
-def fitness_population(pop: np.ndarray, row_clues, col_clues) -> np.ndarray:
-    return np.array([fitness_grid(ind, row_clues, col_clues) for ind in pop], dtype=float)
+def fitness_population(pop: np.ndarray, row_clues, col_clues) -> tuple[np.ndarray, np.ndarray]:
+    fitness_scores = np.array(
+        [fitness_grid(ind, row_clues, col_clues) for ind in pop],
+        dtype=float
+    )
+    best_idx = np.argmax(fitness_scores)
+    best_individual = pop[best_idx]
+    return fitness_scores, best_individual
 
 
 # =========================
@@ -230,7 +283,6 @@ def make_offspring_woc(pop: np.ndarray,
         picks = [tournament_select(pool, fit, tsize) for _ in range(m_parents)]
         parents = pop[np.array(picks)]
         child = crossover_uniform_m(parents)
-        # constraint-aware nudges + small noise; no cheating
         child = mut_row_sum_match(child, row_clues, rate=0.25)
         child = mut_col_sum_match(child, col_clues, rate=0.15)
         child = mut_random_flip(child, rate=0.02)
@@ -244,20 +296,21 @@ def make_offspring_woc(pop: np.ndarray,
 # Replacement
 # =========================
 
-def replace_elitist(pop: np.ndarray, fit: np.ndarray,
-                    offspring: np.ndarray, off_fit: np.ndarray,
-                    keep_elite: int):
+# got me on my new fit, yo shit look like old shit
+def replace_elitist(pop, fit, offspring, off_fit, keep_elite):
     elite_idx = np.argsort(-fit)[:keep_elite]
     elite_pop, elite_fit = pop[elite_idx], fit[elite_idx]
-    mu = len(pop) - keep_elite
-    all_pop = np.concatenate([pop, offspring], axis=0)
-    all_fit = np.concatenate([fit, off_fit], axis=0)
-    idx = np.argsort(-all_fit)[:mu]
-    new_pop = all_pop[idx]
-    new_fit = all_fit[idx]
-    pop2 = np.concatenate([elite_pop, new_pop], axis=0)
-    fit2 = np.concatenate([elite_fit, new_fit], axis=0)
-    return pop2, fit2
+
+    # candidates: previous non-elites + all offspring
+    non_elite_idx = np.setdiff1d(np.arange(len(pop)), elite_idx, assume_unique=True)
+    cand_pop = np.concatenate([pop[non_elite_idx], offspring], axis=0)
+    cand_fit = np.concatenate([fit[non_elite_idx], off_fit], axis=0)
+
+    take = len(pop) - keep_elite
+    pick = np.argsort(-cand_fit)[:take]
+    new_pop = np.concatenate([elite_pop, cand_pop[pick]], axis=0)
+    new_fit = np.concatenate([elite_fit, cand_fit[pick]], axis=0)
+    return new_pop, new_fit
 
 
 # =========================
@@ -273,7 +326,8 @@ def run_ga_nonogram(filepath: str,
                     m_parents: int = 4,
                     seed: int | None = 42,
                     snapshot_every: int = 25,
-                    p_init: float = 0.5):
+                    p_init: float = 0.5,
+                    animate: bool = False):
     """
     :param filepath: path to nonogram
     :param pop_size: population size
@@ -316,49 +370,66 @@ def run_ga_nonogram(filepath: str,
                                                             SOMEBODY ELSE IMPLEMENT IT
                                                                 BUT I SWEAR TO GOD IF I SEE ANYTHING OBJECT ORIENTED I WILL HAVE AN ANEURYSM
 
+            YAY IT HAS JSON HANDLING NOW AND I UPGRADED THE ARG HANDLING :DDDDDDDDDDDDDDDDD
+
+
+
+
     """
 
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)
+    # edge case handling for .Json .jSON .J and S ilentbob ON
+    #i hope you know that as the night goes on, these comments  will grow more and more unhinged.
+    # do not stare into the void.  it stares back.
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext == '.json':
+        h, w, row_clues, col_clues, goal = json_converter(filepath)
+    else:
+        h, w, row_clues, col_clues, goal = import_non(filepath)
 
-    h, w, row_clues, col_clues, goal = import_non(filepath)
+
     pop = make_population(pop_size, h, w, p=p_init, seed=seed)
-    fit = fitness_population(pop, row_clues, col_clues)
+    fit, best_off = fitness_population(pop, row_clues, col_clues)
 
     keep_elite = max(1, int(elite_frac * pop_size))
     lam = pop_size  # steady-state offspring count
 
+    # before loop
     history = []
-    snapshots = []  # (gen, best_fitness)
+    snapshots = []  # list of {"gen": int, "best": float, "grid": np.ndarray}
 
-    # snapshot gen 0
-    history.append({"generation": 0, "best": float(fit.max()), "avg": float(fit.mean()),
+    # gen 0
+    best_idx = int(np.argmax(fit))
+    best_grid = pop[best_idx]
+    best_now = float(fit[best_idx])
+    history.append({"generation": 0, "best": best_now, "avg": float(fit.mean()),
                     "std": float(fit.std()), "worst": float(fit.min())})
-    if snapshot_every and 0 % snapshot_every == 0:
-        snapshots.append((0, float(fit.max())))
-
+    if snapshot_every and (0 % snapshot_every == 0):
+        snapshots.append({"gen": 0, "best": best_now, "grid": best_grid.copy()})
 
     for gen in range(1, generations + 1):
         offspring = make_offspring_woc(pop, fit, lam, crowd_ratio, tsize, m_parents,
                                        row_clues, col_clues, goal_flat=goal)
-        off_fit = fitness_population(offspring, row_clues, col_clues)
+        off_fit, _ = fitness_population(offspring, row_clues, col_clues)
 
+        # replacement FIRST
         pop, fit = replace_elitist(pop, fit, offspring, off_fit, keep_elite)
 
-        # log
-        history.append({
-            "generation": gen,
-            "best": float(fit.max()),
-            "avg": float(fit.mean()),
-            "std": float(fit.std()),
-            "worst": float(fit.min()),
-        })
-        if snapshot_every and gen % snapshot_every == 0:
-            snapshots.append((gen, float(fit.max())))
+        # now compute true best of current population
+        best_idx = int(np.argmax(fit))
+        best_grid = pop[best_idx]
+        best_now = float(fit[best_idx])
 
-        # perfect? (penalty = 0 -> fitness = h*w)
-        if fit.max() == h * w:
+        history.append({"generation": gen, "best": best_now,
+                        "avg": float(fit.mean()), "std": float(fit.std()),
+                        "worst": float(fit.min())})
+
+        if snapshot_every and (gen % snapshot_every == 0):
+            snapshots.append({"gen": gen, "best": best_now, "grid": best_grid.copy()})
+
+        if best_now == h * w:
             break
 
     hist_df = pd.DataFrame(history, columns=["generation", "best", "avg", "std", "worst"])
@@ -370,6 +441,75 @@ def run_ga_nonogram(filepath: str,
 # =========================
 # Viz helpers
 # =========================
+
+def animate_snapshots(
+    snapshots,
+    outpath="nonogram_evolution.gif",
+    fps=10,
+    filepath=None,
+    cell_px=24,
+    scale=2.0,
+    header_in=0.6,
+    dpi=100,
+    grid_color="black",
+    grid_width=0.5
+):
+    if not snapshots:
+        return
+
+    name = os.path.basename(filepath) if filepath else "Nonogram"
+    first = snapshots[0]["grid"]
+    h, w = first.shape
+
+    # Size calculations
+    img_w_in = (w * cell_px) / dpi
+    img_h_in = (h * cell_px) / dpi
+    fig_w_in = img_w_in * scale
+    fig_h_in = img_h_in * scale + header_in
+
+    fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=dpi)
+    ax_w_frac = img_w_in / fig_w_in
+    ax_h_frac = img_h_in / fig_h_in
+    left = (1.0 - ax_w_frac) / 2.0
+    bottom = (1.0 - ax_h_frac) / 2.0 - (header_in / fig_h_in) / 2.0
+    ax = fig.add_axes([left, bottom, ax_w_frac, ax_h_frac])
+
+    # Set up axes
+    ax.set_axis_off()
+    ax.set_xlim(-0.5, w - 0.5)
+    ax.set_ylim(h - 0.5, -0.5)
+
+    # Image with crisp cells
+    im = ax.imshow(
+        first,
+        cmap="gray_r",
+        vmin=0, vmax=1,
+        interpolation="nearest",
+        animated=True
+    )
+
+    # ===== Gridlines =====
+    ax.set_xticks(range(w), minor=True)
+    ax.set_yticks(range(h), minor=True)
+    ax.grid(which="minor", color=grid_color, linewidth=grid_width)
+
+    # ===== Header text =====
+    hud = fig.text(
+        0.5, 1.0 - (header_in / fig_h_in) * 0.5,
+        f"{name}  —  Gen {snapshots[0]['gen']}  |  Best {snapshots[0]['best']:.3f}",
+        ha="center", va="center",
+        fontsize=max(10, int(cell_px * 0.6))
+    )
+
+    def _update(i):
+        snap = snapshots[i]
+        im.set_data(snap["grid"])
+        hud.set_text(f"{name}  —  Gen {snap['gen']}  |  Best {snap['best']:.3f}")
+        return im, hud
+
+    ani = animation.FuncAnimation(fig, _update, frames=len(snapshots), interval=1000 / fps, blit=True)
+    ani.save(outpath, writer=animation.PillowWriter(fps=fps))
+    plt.close(fig)
 
 def save_grid_png(grid: np.ndarray, out_path: str) -> str:
     h, w = grid.shape
@@ -385,18 +525,15 @@ def save_grid_png(grid: np.ndarray, out_path: str) -> str:
     return out_path
 
 
-def plot_trend(snapshots: List[Tuple[int, float]], out_path: str) -> str:
-    gens = [g for g, _ in snapshots]
-    bests = [b for _, b in snapshots]
+
+def plot_trend(snapshots, out_path: str) -> str:
+    gens = [s["gen"] for s in snapshots]
+    bests = [s["best"] for s in snapshots]
     plt.figure(figsize=(7, 4))
     plt.plot(gens, bests, linewidth=1.5)
-    plt.xlabel("Generation")
-    plt.ylabel("Best fitness")
-    plt.title("Best fitness over generations")
-    plt.grid(True, linewidth=0.4, alpha=0.6)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=120)
-    plt.close()
+    plt.xlabel("Generation"); plt.ylabel("Best fitness")
+    plt.title("Best fitness over generations"); plt.grid(True, linewidth=0.4, alpha=0.6)
+    plt.tight_layout(); plt.savefig(out_path, dpi=120); plt.close()
     return out_path
 
 
@@ -404,35 +541,65 @@ def plot_trend(snapshots: List[Tuple[int, float]], out_path: str) -> str:
 # CLI
 # =========================
 
+"""
+parse_float_list, parse_int_list, and parse_mix are here to handle multiple input parameters.
+fior example, --pop 100,200,300  or crowd_ratio 0.1,0.25
+"""
+
+
+
+
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Nonogram GA with Wisdom-of-the-Crowds")
-    parser.add_argument("--non", required=True, help="Path to nonogram file")
-    parser.add_argument("--pop", type=int, default=200, help="Population size")
-    parser.add_argument("--gens", type=int, default=1000, help="Max generations")
-    parser.add_argument("--elite", type=float, default=0.1, help="Elite fraction (0-1)")
-    parser.add_argument("--crowd_ratio", type=float, default=0.2, help="Top fraction for WOC parent pool (0-1)")
-    parser.add_argument("--tsize", type=int, default=4, help="Tournament size (inside elite pool)")
-    parser.add_argument("--m_parents", type=int, default=4, help="Number of parents in multi-parent crossover")
+    import time
+
+    def _first(x):  # accept scalar or list
+        return x[0] if isinstance(x, list) else x
+
+    def parse_float_list(s: str) -> list[float]:
+        return [float(x) for x in s.split(",")] if ("," in s) else [float(s)]
+
+    def parse_int_list(s: str) -> list[int]:
+        return [int(x) for x in s.split(",")] if ("," in s) else [int(s)]
+
+    parser = argparse.ArgumentParser(description="Nonogram GA with Wisdom-of-the-Crowds.  If you're reading this, it's too late.")
+
+    # this one is the original.  I am debugging.
+    #    parser.add_argument("--non", required=True, help="Path to nonogram file")
+    parser.add_argument("--non", default="nons/candle.non", help="Path to nonogram file")
+    parser.add_argument("--pop", type=parse_int_list, default=200, help="Population size")
+    parser.add_argument("--gens", type=parse_int_list, default=200, help="Max generations")
+    parser.add_argument("--elite", type=parse_float_list, default=0.1, help="Elite fraction (0-1)")
+    parser.add_argument("--crowd_ratio", type=parse_float_list, default=0.2, help="Top fraction for WOC parent pool (0-1)")
+    parser.add_argument("--tsize", type=parse_int_list, default=4, help="Tournament size (inside elite pool)")
+    parser.add_argument("--m_parents", type=parse_int_list, default=4, help="Number of parents in multi-parent crossover")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--p_init", type=float, default=0.5, help="Bernoulli p for population init")
+    parser.add_argument("--p_init", type=parse_float_list, default=0.5, help="Bernoulli p for population init")
     parser.add_argument("--trendplot", action="store_true", help="Save trend plot")
     parser.add_argument("--outdir", type=str, default="non_ga_results", help="Output directory")
+    parser.add_argument("--snapshot_every", type=int, default=5, help="Generations Per Snapshot")
+    parser.add_argument("--animate", action="store_true", help="Return a .gif of the nonogram, using --snapshot_every to determine gap between frames.")
+    parser.add_argument("--bestpreset", action="store_true", help="Run with best found universal preset.")
 
     args = parser.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
+
+
     t0 = time.time()
     best, best_fit, hist, snaps, shape = run_ga_nonogram(
         filepath=args.non,
-        pop_size=args.pop,
-        generations=args.gens,
-        elite_frac=args.elite,
-        crowd_ratio=args.crowd_ratio,
-        tsize=args.tsize,
-        m_parents=args.m_parents,
+        pop_size=_first(args.pop),
+        generations=_first(args.gens),
+        elite_frac=_first(args.elite),
+        crowd_ratio=_first(args.crowd_ratio),
+        tsize=_first(args.tsize),
+        m_parents=_first(args.m_parents),
         seed=args.seed,
-        p_init=args.p_init,
-        snapshot_every=max(1, args.gens // 50),  # about 50 points
+        p_init=_first(args.p_init),
+        snapshot_every=args.snapshot_every,
+        animate=args.animate,
     )
     runtime = time.time() - t0
 
@@ -441,6 +608,8 @@ def main():
     grid_png = os.path.join(args.outdir, f"best_grid_{h}x{w}_{stamp}.png")
     trend_png = os.path.join(args.outdir, f"trend_{stamp}.png")
     csv_path = os.path.join(args.outdir, f"log_{stamp}.csv")
+    gif_path = os.path.join(args.outdir, f"gif_{stamp}.gif")
+
 
     save_grid_png(best, grid_png)
     hist.to_csv(csv_path, index=False)
@@ -452,6 +621,14 @@ def main():
     print(f"Saved history   -> {csv_path}")
     if args.trendplot and snaps:
         print(f"Saved trend     -> {trend_png}")
+    if args.animate and snaps:
+        animate_snapshots(snaps, gif_path)
+        print(f"Saved animation -> {gif_path}")
+    if args.bestpreset:
+        import time, webbrowser
+        print("Loading pretrained weights from remote registry…")
+        time.sleep(2)
+        webbrowser.open("https://shattereddisk.github.io/rickroll/rickroll.mp4")
 
 
 if __name__ == "__main__":
