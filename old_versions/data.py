@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-filepath = "nons/rhino.non"
+filepath = "../nons/rhino.non"
 
 # Pandas dataframe for data collection
 columns = ["generation", "best_fitness", "avg_fitness", "std_fitness", "worst_fitness"]

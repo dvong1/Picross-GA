@@ -8,10 +8,10 @@ import json
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt, animation
-
+from itertools import product
 
 # =========================
-# Problem I/O  -   Now with .json handling (wow (oh my gosh) (spencer have my babies you're so good got me FINNA COMPILE)))
+# Problem I/O  -   Now with .json handling (wow (oh my gosh))
 # =========================
 def _runs_of_ones(arr1d: np.ndarray) -> List[int]:
     """
@@ -128,11 +128,12 @@ def seq_penalty(cur: List[int], exp: List[int]) -> int:
     if len(cur) > len(exp):
         overlap += sum(cur[len(exp):])
     elif len(exp) > len(cur):
+
         overlap += sum(exp[len(cur):])
     return group_pen + overlap
 
 """
-fitness_grid and fitness_population check for a population member's (solution) resemblance to the clues.
+fitness_grid and fitness_population check for a population member's (solution) resemblance to the clues, not necessarily the goal.
 
 """
 def fitness_grid(grid: np.ndarray, row_clues, col_clues) -> float:
@@ -190,6 +191,7 @@ def tournament_select(pool_idx: np.ndarray, fit: np.ndarray, tsize: int = 4) -> 
 def crossover_uniform_m(parents: np.ndarray) -> np.ndarray:
     """
     parents: (m, h, w) -> child (h, w)
+
     Majority vote per cell, ties broken randomly.
     """
     m, h, w = parents.shape
@@ -207,6 +209,10 @@ def crossover_uniform_m(parents: np.ndarray) -> np.ndarray:
 # =========================
 
 def mut_random_flip(ind: np.ndarray, rate: float = 0.02) -> np.ndarray:
+    """
+    0 to 1 or 1 to 0 a random index [][]
+    """
+
     mask = (np.random.rand(*ind.shape) < rate)
     out = ind.copy()
     out[mask] ^= 1
@@ -214,6 +220,9 @@ def mut_random_flip(ind: np.ndarray, rate: float = 0.02) -> np.ndarray:
 
 
 def mut_row_sum_match(ind: np.ndarray, row_clues, rate: float = 0.25) -> np.ndarray:
+    """
+    Mutate with respect to sum of row hints, such that the count of 1s is equivalent to the sum of hints
+    """
     h, w = ind.shape
     out = ind.copy()
     for i in range(h):
@@ -234,6 +243,9 @@ def mut_row_sum_match(ind: np.ndarray, row_clues, rate: float = 0.25) -> np.ndar
 
 
 def mut_col_sum_match(ind: np.ndarray, col_clues, rate: float = 0.15) -> np.ndarray:
+    """
+    Mutate with respect to sum of column hints, such that the count of 1s is equivalent to the sum of hints
+    """
     h, w = ind.shape
     out = ind.copy()
     for j in range(w):
@@ -255,6 +267,10 @@ def mut_col_sum_match(ind: np.ndarray, col_clues, rate: float = 0.15) -> np.ndar
 
 
 def mut_guided_to_goal(ind: np.ndarray, goal: np.ndarray, rate: float = 0.01) -> np.ndarray:
+    """
+    Somewhat unnatural mutation, move closer to goal state.
+
+    """
     h, w = ind.shape
     goal2d = goal.reshape(h, w)
     diff = (ind != goal2d)
@@ -278,6 +294,11 @@ def make_offspring_woc(pop: np.ndarray,
                        col_clues,
                        goal_flat: np.ndarray | None = None) -> np.ndarray:
     pool = elite_pool_indices(fit, crowd_ratio)
+    """
+    Currently, we dont pass in configurable chances for mutation rate.  I don't love it.
+    maybe we need mut_match, mut_flip.
+    """
+
     offspring = []
     for _ in range(lam):
         picks = [tournament_select(pool, fit, tsize) for _ in range(m_parents)]
@@ -435,12 +456,43 @@ def run_ga_nonogram(filepath: str,
     hist_df = pd.DataFrame(history, columns=["generation", "best", "avg", "std", "worst"])
     best_idx = int(np.argmax(fit))
     best_grid = pop[best_idx]
-    return best_grid, float(fit[best_idx]), hist_df, snapshots, (h, w)
+    return best_grid, float(fit[best_idx]), hist_df, snapshots, (h, w), goal
+
 
 
 # =========================
 # Viz helpers
 # =========================
+def save_goal_vs_best_png(goal_flat: np.ndarray,
+                          best_grid: np.ndarray,
+                          h: int,
+                          w: int,
+                          out_path: str,
+                          title: str | None = None) -> str:
+    """
+    Goal output vs actual WOC output
+    """
+    goal2d = goal_flat.reshape(h, w)
+
+    fig, axes = plt.subplots(1, 2, figsize=(max(6, w/4*2), max(3, h/4)))
+    titles = ["Goal", "Outcome"]
+    mats = [goal2d, best_grid]
+
+    for ax, mat, t in zip(axes, mats, titles):
+        im = ax.imshow(mat, cmap="gray_r", vmin=0, vmax=1, interpolation="nearest")
+        ax.set_xticks(np.arange(-0.5, w, 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, h, 1), minor=True)
+        ax.grid(which="minor", linewidth=0.5)
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(t, fontsize=12)
+
+    if title:
+        fig.suptitle(title, fontsize=13, y=0.98)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=120)
+    plt.close(fig)
+    return out_path
 
 def animate_snapshots(
     snapshots,
@@ -563,73 +615,85 @@ def main():
     def parse_int_list(s: str) -> list[int]:
         return [int(x) for x in s.split(",")] if ("," in s) else [int(s)]
 
-    parser = argparse.ArgumentParser(description="Nonogram GA with Wisdom-of-the-Crowds.  If you're reading this, it's too late.")
+    parser = argparse.ArgumentParser(description="Nonogram GA with Wisdom-of-the-Crowds")
 
-    # this one is the original.  I am debugging.
-    #    parser.add_argument("--non", required=True, help="Path to nonogram file")
-    parser.add_argument("--non", default="nons/candle.non", help="Path to nonogram file")
-    parser.add_argument("--pop", type=parse_int_list, default=200, help="Population size")
-    parser.add_argument("--gens", type=parse_int_list, default=200, help="Max generations")
-    parser.add_argument("--elite", type=parse_float_list, default=0.1, help="Elite fraction (0-1)")
-    parser.add_argument("--crowd_ratio", type=parse_float_list, default=0.2, help="Top fraction for WOC parent pool (0-1)")
-    parser.add_argument("--tsize", type=parse_int_list, default=4, help="Tournament size (inside elite pool)")
-    parser.add_argument("--m_parents", type=parse_int_list, default=4, help="Number of parents in multi-parent crossover")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--p_init", type=parse_float_list, default=0.5, help="Bernoulli p for population init")
-    parser.add_argument("--trendplot", action="store_true", help="Save trend plot")
-    parser.add_argument("--outdir", type=str, default="non_ga_results", help="Output directory")
-    parser.add_argument("--snapshot_every", type=int, default=5, help="Generations Per Snapshot")
-    parser.add_argument("--animate", action="store_true", help="Return a .gif of the nonogram, using --snapshot_every to determine gap between frames.")
-    parser.add_argument("--bestpreset", action="store_true", help="Run with best found universal preset.")
+    parser.add_argument("--non", required=True, help="Path to nonogram file")
+    parser.add_argument("--pop", type=parse_int_list, default=[200])
+    parser.add_argument("--gens", type=parse_int_list, default=[200])
+    parser.add_argument("--elite", type=parse_float_list, default=[0.1])
+    parser.add_argument("--crowd_ratio", type=parse_float_list, default=[0.2])
+    parser.add_argument("--tsize", type=parse_int_list, default=[4])
+    parser.add_argument("--m_parents", type=parse_int_list, default=[4])
+    parser.add_argument("--seed", type=parse_int_list, default=[42])
+    parser.add_argument("--p_init", type=parse_float_list, default=[0.5])
+    parser.add_argument("--trendplot", action="store_true")
+    parser.add_argument("--comparepng", action="store_true")
+    parser.add_argument("--animate", action="store_true")
+    parser.add_argument("--outdir", type=str, default="non_ga_results")
+    parser.add_argument("--snapshot_every", type=int, default=5)
 
     args = parser.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
+    for pop_size, generations, elite_frac, crowd_ratio, tsize, m_parents, seed, p_init in product(
+        args.pop, args.gens, args.elite, args.crowd_ratio,
+        args.tsize, args.m_parents, args.seed, args.p_init
+    ):
+        print("\n====================================================")
+        print(f"RUN pop={pop_size}, gens={generations}, elite={elite_frac}, "
+              f"crowd={crowd_ratio}, tsize={tsize}, m_parents={m_parents}, "
+              f"seed={seed}, p_init={p_init}")
+        print("====================================================\n")
 
+        t0 = time.time()
+        best, best_fit, hist, snaps, shape, goal = run_ga_nonogram(
+            filepath=args.non,
+            pop_size=pop_size,
+            generations=generations,
+            elite_frac=elite_frac,
+            crowd_ratio=crowd_ratio,
+            tsize=tsize,
+            m_parents=m_parents,
+            seed=seed,
+            p_init=p_init,
+            snapshot_every=args.snapshot_every,
+            animate=args.animate,
+        )
+        runtime = time.time() - t0
 
-    t0 = time.time()
-    best, best_fit, hist, snaps, shape = run_ga_nonogram(
-        filepath=args.non,
-        pop_size=_first(args.pop),
-        generations=_first(args.gens),
-        elite_frac=_first(args.elite),
-        crowd_ratio=_first(args.crowd_ratio),
-        tsize=_first(args.tsize),
-        m_parents=_first(args.m_parents),
-        seed=args.seed,
-        p_init=_first(args.p_init),
-        snapshot_every=args.snapshot_every,
-        animate=args.animate,
-    )
-    runtime = time.time() - t0
+        h, w = shape
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    h, w = shape
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    grid_png = os.path.join(args.outdir, f"best_grid_{h}x{w}_{stamp}.png")
-    trend_png = os.path.join(args.outdir, f"trend_{stamp}.png")
-    csv_path = os.path.join(args.outdir, f"log_{stamp}.csv")
-    gif_path = os.path.join(args.outdir, f"gif_{stamp}.gif")
+        # filenames incorporate parameter settings to disambiguate
+        tag = f"p{pop_size}_g{generations}_e{elite_frac}_c{crowd_ratio}_t{tsize}_m{m_parents}_s{seed}"
 
+        grid_png = os.path.join(args.outdir, f"best_{tag}_{stamp}.png")
+        trend_png = os.path.join(args.outdir, f"trend_{tag}_{stamp}.png")
+        csv_path = os.path.join(args.outdir, f"log_{tag}_{stamp}.csv")
+        gif_path = os.path.join(args.outdir, f"gif_{tag}_{stamp}.gif")
+        compare_png = os.path.join(args.outdir, f"compare_{tag}_{stamp}.png")
 
-    save_grid_png(best, grid_png)
-    hist.to_csv(csv_path, index=False)
-    if args.trendplot and snaps:
-        plot_trend(snaps, trend_png)
+        save_grid_png(best, grid_png)
+        hist.to_csv(csv_path, index=False)
 
-    print(f"[DONE] best_fitness={best_fit:.6f} shape={h}x{w} runtime={runtime:.2f}s")
-    print(f"Saved best grid -> {grid_png}")
-    print(f"Saved history   -> {csv_path}")
-    if args.trendplot and snaps:
-        print(f"Saved trend     -> {trend_png}")
-    if args.animate and snaps:
-        animate_snapshots(snaps, gif_path)
-        print(f"Saved animation -> {gif_path}")
-    if args.bestpreset:
-        import time, webbrowser
-        print("Loading pretrained weights from remote registry…")
-        time.sleep(2)
-        webbrowser.open("https://shattereddisk.github.io/rickroll/rickroll.mp4")
+        if args.trendplot and snaps:
+            plot_trend(snaps, trend_png)
 
+        if args.comparepng:
+            save_goal_vs_best_png(goal, best, h, w, compare_png, title=os.path.basename(args.non))
+
+        if args.animate and snaps:
+            animate_snapshots(snaps, gif_path)
+
+        print(f"[DONE] best_fitness={best_fit:.6f} shape={h}x{w} runtime={runtime:.2f}s")
+        print(f"Saved grid  -> {grid_png}")
+        print(f"Saved log   -> {csv_path}")
+        if args.trendplot and snaps:
+            print(f"Saved trend -> {trend_png}")
+        if args.comparepng:
+            print(f"Saved compare -> {compare_png}")
+        if args.animate and snaps:
+            print(f"Saved GIF -> {gif_path}")
 
 if __name__ == "__main__":
     main()

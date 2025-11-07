@@ -1,12 +1,11 @@
 import GA
 import viz
 import data
-import matplotlib.pyplot as plt
 from data import gaHistory
 import random
 
 
-filepath = "nons/ubuntu.non"
+filepath = "../nons/ubuntu.non"
 
 populationSize = 50
 generation = 0
